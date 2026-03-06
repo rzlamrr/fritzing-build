@@ -7,7 +7,11 @@ jobs:
   build:
     runs-on: windows-2022
 
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+
     steps:
+      # ── 1. Checkout Fritzing source ──────────────────────────────────────
       - name: Checkout fritzing-app
         uses: actions/checkout@v4
         with:
@@ -20,58 +24,61 @@ jobs:
           repository: fritzing/fritzing-parts
           path: fritzing-parts
 
-      - name: Setup MSVC
+      # ── 2. Setup MSVC 2022 64-bit environment ────────────────────────────
+      - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
 
+      # ── 3. Install Qt 6.7.3 (latest LTS at time of writing) ─────────────
+      #       Arch label for MSVC 2022 / 2019 64-bit is identical
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.5.3'
+          version: '6.7.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
+          modules: 'qt5compat'
+          cache: true
 
-      - name: Install Boost
+      # ── 4. Install C++ dependencies via vcpkg ────────────────────────────
+      #       vcpkg is pre-installed on windows-2022 runners.
+      #       boost headers-only, libgit2-static, quazip, openssl
+      - name: Install dependencies with vcpkg
         run: |
-          Invoke-WebRequest -Uri https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.zip -OutFile boost.zip
-          Expand-Archive boost.zip -DestinationPath .
-          Rename-Item boost_1_83_0 boost
-        shell: powershell
+          vcpkg install boost-filesystem boost-optional boost-assign `
+                        libgit2 quazip openssl `
+                        --triplet x64-windows
+        shell: pwsh
 
-      - name: Build libgit2
+      # ── 5. Build libgit2 (vcpkg already handles this, kept for reference) ─
+      #       libgit2 from vcpkg is at the latest stable release automatically.
+
+      # ── 6. Configure and build Fritzing ─────────────────────────────────
+      - name: Configure Fritzing (qmake)
+        working-directory: fritzing-app
         run: |
-          git clone https://github.com/libgit2/libgit2.git
-          cd libgit2
-          mkdir build
-          cd build
-          cmake .. -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --config Release
+          qmake phoenix.pro ^
+            BOOST_PATH="%VCPKG_ROOT%\installed\x64-windows\include" ^
+            LIBGIT2_PATH="%VCPKG_ROOT%\installed\x64-windows"
         shell: cmd
 
-      - name: Build ngspice
-        run: |
-          git clone https://git.code.sf.net/p/ngspice/ngspice
-          cd ngspice
-          # Simplified, usually requires MSYS2 or complex MSVC build. 
-          # Fritzing CI has prebuilt binaries via vcpkg or similar.
-          # Here we leave it as placeholder for ngspice library path.
-        continue-on-error: true
-
-      - name: Build Fritzing
-        run: |
-          cd fritzing-app
-          qmake phoenix.pro
-          nmake release
+      - name: Build Fritzing (nmake)
+        working-directory: fritzing-app
+        run: nmake release
         shell: cmd
 
-      - name: Run windeployqt
-        run: |
-          cd fritzing-app/release
-          windeployqt Fritzing.exe
+      # ── 7. Deploy Qt runtime DLLs next to the executable ────────────────
+      - name: Deploy Qt (windeployqt)
+        working-directory: fritzing-app/release
+        run: windeployqt Fritzing.exe
         shell: cmd
 
-      - name: Upload Artifact
+      # ── 8. Upload the finished build as a downloadable artifact ─────────
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fritzing-windows-build
+          name: fritzing-windows-x64
           path: fritzing-app/release/
+          retention-days: 14

@@ -14,6 +14,12 @@ jobs:
       VCPKG_ROOT: C:\vcpkg
 
     steps:
+      # ── 0. Checkout this build repo (for patches) ────────────────────────
+      - name: Checkout fritzing-build
+        uses: actions/checkout@v4
+        with:
+          path: fritzing-build
+
       # ── 1. Checkout Fritzing source ──────────────────────────────────────
       - name: Checkout fritzing-app
         uses: actions/checkout@v4
@@ -26,6 +32,12 @@ jobs:
         with:
           repository: fritzing/fritzing-parts
           path: fritzing-parts
+
+      # ── 1b. Apply build patches ──────────────────────────────────────────
+      - name: Patch libgit2detect.pri for vcpkg
+        working-directory: fritzing-app
+        run: git apply ../fritzing-build/patches/libgit2detect-vcpkg.patch
+        shell: bash
 
       # ── 2. Setup MSVC 2022 64-bit environment ────────────────────────────
       - name: Setup MSVC environment
@@ -52,7 +64,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-x64-windows-${{ hashFiles('**/build-windows.yml') }}
+          key: vcpkg-x64-windows-${{ hashFiles('**/windows.yml') }}
           restore-keys: |
             vcpkg-x64-windows-
 

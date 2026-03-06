@@ -1,0 +1,81 @@
+--- a/pri/libgit2detect.pri
++++ b/pri/libgit2detect.pri
+@@ -28,30 +28,51 @@
+ }
+ 
+ 
+ win32 {
+-	if ($$LIBGIT_STATIC) {
+-		LIBGIT2INCLUDE = "$$_PRO_FILE_PWD_/../libgit2/include"
++	# If LIBGIT2_PATH is passed on the qmake command line (e.g. from vcpkg),
++	# use its standard include/ and lib/ layout. Otherwise fall back to the
++	# legacy ../libgit2 sibling-directory layout.
++	!isEmpty(LIBGIT2_PATH) {
++		LIBGIT2INCLUDE = "$$LIBGIT2_PATH/include"
++		LIBGIT2LIB     = "$$LIBGIT2_PATH/lib"
+ 
+ 		exists($$LIBGIT2INCLUDE/git2.h) {
+-			message("found libgit2 include path at $$LIBGIT2INCLUDE")
+-		} else {
+-			message("Fritzing requires libgit2")
+-			message("Build it from the repo at https://github.com/libgit2")
+-			message("See https://github.com/fritzing/fritzing-app/wiki for details.")
+-
+-			error("libgit2 include path not found in $$LIBGIT2INCLUDE")
+-		}
+-	}
+-
+-    contains(QMAKE_TARGET.arch, x86_64) {
+-        LIBGIT2LIB = "$$_PRO_FILE_PWD_/../libgit2/build64/Release"
+-    } else {
+-        LIBGIT2LIB = "$$_PRO_FILE_PWD_/../libgit2/build32/Release"
+-    }
+-
+-    exists($$LIBGIT2LIB/git2.lib) {
+-        message("found libgit2 library in $$LIBGIT2LIB")
+-    } else {
+-        error("libgit2 library not found in $$LIBGIT2LIB")
+-    }
++			message("found libgit2 include path at $$LIBGIT2INCLUDE (from LIBGIT2_PATH)")
++		} else {
++			error("libgit2 include path not found in $$LIBGIT2INCLUDE (LIBGIT2_PATH was set)")
++		}
++
++		exists($$LIBGIT2LIB/git2.lib) {
++			message("found libgit2 library in $$LIBGIT2LIB (from LIBGIT2_PATH)")
++		} else {
++			error("libgit2 library not found in $$LIBGIT2LIB (LIBGIT2_PATH was set)")
++		}
++	} else {
++		# Legacy layout: ../libgit2/include  +  ../libgit2/build{32,64}/Release
++		if ($$LIBGIT_STATIC) {
++			LIBGIT2INCLUDE = "$$_PRO_FILE_PWD_/../libgit2/include"
++
++			exists($$LIBGIT2INCLUDE/git2.h) {
++				message("found libgit2 include path at $$LIBGIT2INCLUDE")
++			} else {
++				message("Fritzing requires libgit2")
++				message("Build it from the repo at https://github.com/libgit2")
++				message("See https://github.com/fritzing/fritzing-app/wiki for details.")
++
++				error("libgit2 include path not found in $$LIBGIT2INCLUDE")
++			}
++		}
++
++		contains(QMAKE_TARGET.arch, x86_64) {
++			LIBGIT2LIB = "$$_PRO_FILE_PWD_/../libgit2/build64/Release"
++		} else {
++			LIBGIT2LIB = "$$_PRO_FILE_PWD_/../libgit2/build32/Release"
++		}
++
++		exists($$LIBGIT2LIB/git2.lib) {
++			message("found libgit2 library in $$LIBGIT2LIB")
++		} else {
++			error("libgit2 library not found in $$LIBGIT2LIB")
++		}
++	}
+ 
+ 	INCLUDEPATH += $$LIBGIT2INCLUDE
+-    LIBS += -L$$LIBGIT2LIB -lgit2
++	LIBS += -L$$LIBGIT2LIB -lgit2
+ }

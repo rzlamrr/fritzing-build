@@ -2,20 +2,20 @@ name: Build Fritzing on Windows
 
 on:
   workflow_dispatch:
-  
+
 jobs:
   build:
     runs-on: windows-2022
 
     steps:
       - name: Checkout fritzing-app
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: fritzing/fritzing-app
           path: fritzing-app
 
       - name: Checkout fritzing-parts
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: fritzing/fritzing-parts
           path: fritzing-parts
@@ -24,7 +24,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           version: '6.5.3'
           host: 'windows'
@@ -71,7 +71,7 @@ jobs:
         shell: cmd
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fritzing-windows-build
           path: fritzing-app/release/

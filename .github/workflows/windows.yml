@@ -33,12 +33,12 @@ jobs:
         with:
           arch: amd64
 
-      # ── 3. Install Qt 6.5.10 (max version allowed by phoenix.pro) ───────
+      # ── 3. Install Qt 6.5.3 (latest open-source 6.5.x; phoenix.pro allows 6.5.3–6.5.10)
       #       Arch label for MSVC 2022 / 2019 64-bit is identical
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.5.10'
+          version: '6.5.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'

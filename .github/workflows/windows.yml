@@ -1,0 +1,80 @@
+name: Build Fritzing on Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    steps:
+      - name: Checkout fritzing-app
+        uses: actions/checkout@v3
+        with:
+          repository: fritzing/fritzing-app
+          path: fritzing-app
+
+      - name: Checkout fritzing-parts
+        uses: actions/checkout@v3
+        with:
+          repository: fritzing/fritzing-parts
+          path: fritzing-parts
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.5.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+
+      - name: Install Boost
+        run: |
+          Invoke-WebRequest -Uri https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.zip -OutFile boost.zip
+          Expand-Archive boost.zip -DestinationPath .
+          Rename-Item boost_1_83_0 boost
+        shell: powershell
+
+      - name: Build libgit2
+        run: |
+          git clone https://github.com/libgit2/libgit2.git
+          cd libgit2
+          mkdir build
+          cd build
+          cmake .. -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --config Release
+        shell: cmd
+
+      - name: Build ngspice
+        run: |
+          git clone https://git.code.sf.net/p/ngspice/ngspice
+          cd ngspice
+          # Simplified, usually requires MSYS2 or complex MSVC build. 
+          # Fritzing CI has prebuilt binaries via vcpkg or similar.
+          # Here we leave it as placeholder for ngspice library path.
+        continue-on-error: true
+
+      - name: Build Fritzing
+        run: |
+          cd fritzing-app
+          qmake phoenix.pro
+          nmake release
+        shell: cmd
+
+      - name: Run windeployqt
+        run: |
+          cd fritzing-app/release
+          windeployqt Fritzing.exe
+        shell: cmd
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: fritzing-windows-build
+          path: fritzing-app/release/

@@ -9,6 +9,9 @@ jobs:
 
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
+      # Pin VCPKG_ROOT to the runner's pre-installed copy to suppress
+      # the mismatch warning with the VS-bundled vcpkg path.
+      VCPKG_ROOT: C:\vcpkg
 
     steps:
       # ── 1. Checkout Fritzing source ──────────────────────────────────────
@@ -30,30 +33,36 @@ jobs:
         with:
           arch: amd64
 
-      # ── 3. Install Qt 6.7.3 (latest LTS at time of writing) ─────────────
+      # ── 3. Install Qt 6.5.10 (max version allowed by phoenix.pro) ───────
       #       Arch label for MSVC 2022 / 2019 64-bit is identical
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.3'
+          version: '6.5.10'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
           modules: 'qt5compat'
           cache: true
 
-      # ── 4. Install C++ dependencies via vcpkg ────────────────────────────
-      #       vcpkg is pre-installed on windows-2022 runners.
-      #       boost headers-only, libgit2-static, quazip, openssl
+      # ── 4. Cache vcpkg installed packages ────────────────────────────────
+      #       Caches the installed/ directory so subsequent runs skip
+      #       downloading and compiling all C++ dependencies.
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-x64-windows-${{ hashFiles('**/build-windows.yml') }}
+          restore-keys: |
+            vcpkg-x64-windows-
+
+      # ── 5. Install C++ dependencies via vcpkg ───────────────────────────
       - name: Install dependencies with vcpkg
         run: |
           vcpkg install boost-filesystem boost-optional boost-assign `
-                        libgit2 quazip openssl `
-                        --triplet x64-windows
+            libgit2 quazip openssl `
+            --triplet x64-windows
         shell: pwsh
-
-      # ── 5. Build libgit2 (vcpkg already handles this, kept for reference) ─
-      #       libgit2 from vcpkg is at the latest stable release automatically.
 
       # ── 6. Configure and build Fritzing ─────────────────────────────────
       - name: Configure Fritzing (qmake)

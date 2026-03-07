@@ -45,6 +45,15 @@ jobs:
         with:
           arch: amd64
 
+      # ── 2b. Re-pin VCPKG_ROOT ────────────────────────────────────────────
+      #        ilammy/msvc-dev-cmd runs vcvarsall.bat which overrides
+      #        VCPKG_ROOT to the VS-bundled path. Re-set it to the runner's
+      #        pre-installed copy where our packages are actually installed.
+      - name: Pin VCPKG_ROOT after MSVC setup
+        run: echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+        shell: pwsh
+
+
       # ── 3. Install Qt 6.5.3 (latest open-source 6.5.x; phoenix.pro allows 6.5.3–6.5.10)
       #       Arch label for MSVC 2022 / 2019 64-bit is identical
       - name: Install Qt
@@ -57,13 +66,16 @@ jobs:
           modules: 'qt5compat'
           cache: true
 
-      # ── 4. Cache vcpkg installed packages ────────────────────────────────
-      #       Caches the installed/ directory so subsequent runs skip
-      #       downloading and compiling all C++ dependencies.
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
+      # ── 4. Restore vcpkg cache ──────────────────────────────────────────
+      #       Restore the installed/ tree and binary cache from a previous
+      #       run so vcpkg install can skip already-built packages.
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
-          path: C:\vcpkg\installed
+          path: |
+            C:\vcpkg\installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-x64-windows-${{ hashFiles('**/windows.yml') }}
           restore-keys: |
             vcpkg-x64-windows-
@@ -76,14 +88,37 @@ jobs:
             --triplet x64-windows
         shell: pwsh
 
+      # ── 5a. Save vcpkg cache immediately ─────────────────────────────────
+      #        Save right after install so the 3-hour build is never lost,
+      #        even if a later step (e.g. qmake) fails.
+      - name: Save vcpkg cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-x64-windows-${{ hashFiles('**/windows.yml') }}
+
+      # ── 5b. Verify libgit2 is installed correctly ────────────────────────
+      - name: Verify vcpkg packages
+        run: |
+          echo "VCPKG_ROOT = $env:VCPKG_ROOT"
+          echo "--- libgit2 include ---"
+          Get-ChildItem "$env:VCPKG_ROOT\installed\x64-windows\include\git2*" -ErrorAction SilentlyContinue
+          echo "--- libgit2 lib ---"
+          Get-ChildItem "$env:VCPKG_ROOT\installed\x64-windows\lib\git2*" -ErrorAction SilentlyContinue
+        shell: pwsh
+
       # ── 6. Configure and build Fritzing ─────────────────────────────────
       - name: Configure Fritzing (qmake)
         working-directory: fritzing-app
         run: |
-          qmake phoenix.pro ^
-            BOOST_PATH="%VCPKG_ROOT%\installed\x64-windows\include" ^
-            LIBGIT2_PATH="%VCPKG_ROOT%\installed\x64-windows"
-        shell: cmd
+          $VcpkgInstalled = "$env:VCPKG_ROOT\installed\x64-windows"
+          qmake phoenix.pro `
+            "BOOST_PATH=$VcpkgInstalled\include" `
+            "LIBGIT2_PATH=$VcpkgInstalled"
+        shell: pwsh
 
       - name: Build Fritzing (nmake)
         working-directory: fritzing-app

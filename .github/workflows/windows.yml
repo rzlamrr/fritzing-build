@@ -76,7 +76,7 @@ jobs:
           path: |
             C:\vcpkg\installed
             C:\Users\runneradmin\AppData\Local\vcpkg\archives
-          key: vcpkg-x64-windows-${{ hashFiles('**/windows.yml') }}
+          key: vcpkg-x64-windows-${{ hashFiles('**/vcpkg-deps.txt') }}
           restore-keys: |
             vcpkg-x64-windows-
 
@@ -98,7 +98,7 @@ jobs:
           path: |
             C:\vcpkg\installed
             C:\Users\runneradmin\AppData\Local\vcpkg\archives
-          key: vcpkg-x64-windows-${{ hashFiles('**/windows.yml') }}
+          key: vcpkg-x64-windows-${{ hashFiles('**/vcpkg-deps.txt') }}
 
       # ── 5b. Verify libgit2 is installed correctly ────────────────────────
       - name: Verify vcpkg packages

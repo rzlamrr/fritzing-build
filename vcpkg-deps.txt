@@ -1,0 +1,6 @@
+boost-filesystem
+boost-optional
+boost-assign
+libgit2
+quazip
+openssl

@@ -134,6 +134,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Two pushes in quick succession must not both create the draft; wait instead of cancelling
+    concurrency:
+      group: release-draft
+      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}

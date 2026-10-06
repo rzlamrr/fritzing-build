@@ -284,7 +284,7 @@ jobs:
 
       # The release job in build.yml publishes these
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           if-no-files-found: error

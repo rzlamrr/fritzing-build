@@ -99,7 +99,7 @@ jobs:
       # Cache built dependencies (key changes whenever fritzing-app changes what it expects)
       - name: Cache dependencies
         id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             libgit2-${{ env.LIBGIT2_VERSION }}

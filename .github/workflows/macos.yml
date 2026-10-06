@@ -1,0 +1,284 @@
+name: Build Fritzing on macOS
+
+on:
+  push:
+    branches: [ master, add-macos-build ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: '6.8.2'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on macOS (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            arch: arm64
+            name: Apple Silicon (ARM64)
+          - os: macos-26-intel
+            arch: x86_64
+            name: Intel (x86_64)
+
+    steps:
+      # ── 0. Checkout repositories ──────────────────────────────────────────
+      - name: Checkout fritzing-build
+        uses: actions/checkout@v4
+        with:
+          path: fritzing-build
+
+      - name: Checkout fritzing-app
+        uses: actions/checkout@v4
+        with:
+          repository: fritzing/fritzing-app
+          ref: develop
+          path: fritzing-app
+
+      - name: Checkout fritzing-parts
+        uses: actions/checkout@v4
+        with:
+          repository: fritzing/fritzing-parts
+          ref: main
+          path: fritzing-parts
+
+      # ── 1. Install System Dependencies ────────────────────────────────────
+      - name: Install System Dependencies
+        run: |
+          brew install cmake ninja p7zip libngspice
+
+      # ── 2. Install Qt ─────────────────────────────────────────────────────
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: 'mac'
+          target: 'desktop'
+          arch: 'clang_64'
+          modules: 'qtserialport qt5compat'
+          cache: true
+
+      # ── 3. Cache built dependencies ───────────────────────────────────────
+      - name: Cache dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            libgit2-1.7.1
+            quazip-${{ env.QT_VERSION }}-1.4intuisphere
+            Clipper1-6.4.2
+            boost_1_85_0
+            svgpp-1.3.1
+            ngspice-42
+          key: macos-deps-v4-${{ env.QT_VERSION }}-${{ matrix.arch }}
+
+      # ── 4. Build libgit2 (Static) ─────────────────────────────────────────
+      - name: Build libgit2
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.7.1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
+          cd libgit2-1.7.1
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DUSE_SSH=OFF \
+            -DUSE_NTLMCLIENT=OFF \
+            -DUSE_BUNDLED_ZLIB=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          mkdir -p lib
+          find build -name "libgit2.a" -exec cp {} lib/libgit2.a \;
+          cd ..
+          ln -sfn libgit2-1.7.1 libgit2 2>/dev/null || true
+
+      # ── 5. Build QuaZip ───────────────────────────────────────────────────
+      - name: Build QuaZip
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L -o quazip.tar.gz https://github.com/stachenov/quazip/archive/refs/tags/v1.4.tar.gz
+          tar -xzf quazip.tar.gz
+          cd quazip-1.4
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DQUAZIP_QT_MAJOR_VERSION=6 \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          cd ..
+
+          TARGET_DIR="quazip-${{ env.QT_VERSION }}-1.4intuisphere"
+          mkdir -p "$TARGET_DIR/lib"
+          mkdir -p "$TARGET_DIR/include/QuaZip-Qt6-1.4/quazip"
+
+          find quazip-1.4/build -name "*.dylib" -exec cp {} "$TARGET_DIR/lib/" \;
+          cp quazip-1.4/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-1.4/"
+          cp quazip-1.4/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-1.4/quazip/"
+
+      # ── 6. Build Clipper ──────────────────────────────────────────────────
+      - name: Download and build Clipper
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L -o clipper.zip "https://sourceforge.net/projects/polyclipping/files/clipper_ver6.4.2.zip/download"
+          unzip -q clipper.zip -d clipper-src
+          mkdir -p Clipper1-6.4.2/lib Clipper1-6.4.2/include/polyclipping
+
+          CPP_FILE=$(find clipper-src -name "clipper.cpp" | head -n 1)
+          HPP_FILE=$(find clipper-src -name "clipper.hpp" | head -n 1)
+          cp "$HPP_FILE" Clipper1-6.4.2/include/polyclipping/
+          cp "$HPP_FILE" Clipper1-6.4.2/include/
+
+          clang++ -arch ${{ matrix.arch }} -O3 -fPIC -c "$CPP_FILE" -I Clipper1-6.4.2/include/polyclipping -o clipper.o
+          ar rcs Clipper1-6.4.2/lib/libpolyclipping.a clipper.o
+          rm -rf clipper.o clipper-src clipper.zip
+
+      # ── 7. Download Boost & SVG++ ──────────────────────────────────────────
+      - name: Download Boost and SVG++
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.gz | tar -xz
+          curl -L https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz | tar -xz
+
+      # ── 8. Setup ngspice ──────────────────────────────────────────────────
+      - name: Setup ngspice headers and library
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          NGSPICE_PREFIX=$(brew --prefix libngspice)
+          mkdir -p ngspice-42/include ngspice-42/lib
+          cp -R "$NGSPICE_PREFIX/include/"* ngspice-42/include/
+          find "$NGSPICE_PREFIX/lib" -name "libngspice*.dylib" -exec cp {} ngspice-42/lib/ \;
+
+      # ── 9. Verify dependency layout ───────────────────────────────────────
+      - name: Verify dependency layout
+        run: |
+          echo "=== Dependency Check ==="
+          ls -la libgit2-1.7.1/include/git2.h
+          ls -la libgit2-1.7.1/lib/libgit2.a
+          ls -la quazip-${{ env.QT_VERSION }}-1.4intuisphere/lib/
+          ls -la Clipper1-6.4.2/lib/libpolyclipping.a
+          ls -la boost_1_85_0/boost/version.hpp
+          ls -la svgpp-1.3.1/include/svgpp/svgpp.hpp
+          ls -la ngspice-42/include/ngspice/sharedspice.h
+
+      # ── 10. Extract Version ───────────────────────────────────────────────
+      - name: Extract Fritzing Version
+        run: |
+          VERSION=$(python3 -c '
+          import re
+          c = open("fritzing-app/src/version/version.cpp").read()
+          major = re.search(r"m_majorVersion\(\"([^\"]*)\"\)", c).group(1)
+          minor = re.search(r"m_minorVersion\(\"([^\"]*)\"\)", c).group(1)
+          patch = re.search(r"m_minorSubVersion\(\"([^\"]*)\"\)", c).group(1)
+          mod = re.search(r"m_modifier\(\"([^\"]*)\"\)", c).group(1)
+          print(f"{major}.{minor}.{patch}{mod}")
+          ')
+          echo "FRITZING_VER=$VERSION" >> $GITHUB_ENV
+          echo "Building Fritzing version: $VERSION"
+
+      # ── 11. Configure & Build Fritzing ────────────────────────────────────
+      - name: Configure Fritzing (qmake)
+        working-directory: fritzing-app
+        run: |
+          ARCH=$(uname -m)
+          # Ensure QMAKE_APPLE_DEVICE_ARCHS matches the runner architecture exactly
+          sed -i.bak "s/QMAKE_APPLE_DEVICE_ARCHS = .*/QMAKE_APPLE_DEVICE_ARCHS = $ARCH/" phoenix.pro
+          qmake phoenix.pro "CONFIG+=release"
+
+      # groundplanegenerator.cpp uses PdmDevicePixelRatioF_EncodedA/B and
+      # QPaintDevice::encodeMetricF() which were added in Qt 6.8. Guard them
+      # so the file still compiles against Qt 6.5.3.
+      - name: Patch source for Qt 6.5 compatibility
+        run: |
+          python3 - <<'PYEOF'
+          import re, pathlib
+          f = pathlib.Path("fritzing-app/src/svg/groundplanegenerator.cpp")
+          src = f.read_text()
+          # Guard the Qt >=6.8 enum cases
+          pattern = (
+              r"([ \t]*case PdmDevicePixelRatioF_EncodedA:\s*\n"
+              r"[ \t]*case PdmDevicePixelRatioF_EncodedB:\s*\n"
+              r"[ \t]*return QPaintDevice::encodeMetricF\(metric, 1\.0\);)"
+          )
+          replacement = (
+              "#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)\n"
+              r"\1"
+              "\n#endif"
+          )
+          patched, n = re.subn(pattern, replacement, src)
+          if n:
+              f.write_text(patched)
+              print(f"Patched {n} occurrence(s) in {f}")
+          else:
+              print("Pattern not found – no patch needed (already guarded or removed upstream)")
+          PYEOF
+
+      - name: Build Fritzing (make)
+        working-directory: fritzing-app
+        run: |
+          make release -j$(sysctl -n hw.ncpu) || make -j$(sysctl -n hw.ncpu)
+
+
+      # ── 12. Bundle Third-Party Assets & Deploy Qt ─────────────────────────
+      - name: Bundle Assets and Package App
+        run: |
+          APP_PATH="release64/Fritzing.app"
+          RES_PATH="$APP_PATH/Contents/Resources"
+          FRAMEWORKS_PATH="$APP_PATH/Contents/Frameworks"
+
+          mkdir -p "$RES_PATH" "$FRAMEWORKS_PATH"
+
+          # Copy runtime assets required by Fritzing
+          cp -R fritzing-app/help "$RES_PATH/"
+          cp -R fritzing-app/sketches "$RES_PATH/"
+          cp -R fritzing-app/translations "$RES_PATH/"
+          cp -R fritzing-parts "$RES_PATH/parts"
+
+          # Copy extra dynamic libraries into app bundle
+          cp quazip-${{ env.QT_VERSION }}-1.4intuisphere/lib/*.dylib "$FRAMEWORKS_PATH/" || true
+          cp ngspice-42/lib/*.dylib "$FRAMEWORKS_PATH/" 2>/dev/null || true
+
+          # Deploy Qt frameworks
+          macdeployqt "$APP_PATH" -always-overwrite
+
+          ARCH=$(uname -m)
+          DMG_NAME="Fritzing-${{ env.FRITZING_VER }}-macOS-${ARCH}.dmg"
+          ZIP_NAME="Fritzing-${{ env.FRITZING_VER }}-macOS-${ARCH}.zip"
+
+          # Create DMG image
+          hdiutil create -volname "Fritzing" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+          echo "DMG_FILE=$DMG_NAME" >> $GITHUB_ENV
+
+          # Create ZIP archive (preserves symlinks and macOS metadata)
+          cd release64
+          ditto -c -k --keepParent Fritzing.app "../$ZIP_NAME"
+          cd ..
+          echo "ZIP_FILE=$ZIP_NAME" >> $GITHUB_ENV
+
+      # ── 13. Upload Build Artifacts ─────────────────────────────────────────
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fritzing-macOS-${{ runner.arch }}
+          path: |
+            ${{ env.DMG_FILE }}
+            ${{ env.ZIP_FILE }}
+
+      # ── 14. Create / Update GitHub Release (master only) ──────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/master'
+        with:
+          tag_name: ${{ env.FRITZING_VER }}
+          name: "Fritzing ${{ env.FRITZING_VER }}"
+          files: |
+            ${{ env.DMG_FILE }}
+            ${{ env.ZIP_FILE }}
+          draft: true
+          token: ${{ secrets.CUSTOM_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

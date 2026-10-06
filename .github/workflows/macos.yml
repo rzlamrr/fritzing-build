@@ -231,6 +231,12 @@ jobs:
           cp -R fritzing-app/help "$RES_PATH/"
           cp -R fritzing-app/sketches "$RES_PATH/"
           cp -R fritzing-app/translations "$RES_PATH/"
+
+          # Like upstream's deploy_fritzing_mac.sh: licence texts travel with the binaries (GPL, plus the
+          # LGPL Qt and QuaZip libraries), and only the compiled translations are needed at runtime
+          cp fritzing-app/LICENSE* fritzing-app/README.md fritzing-app/INSTALL.txt "$RES_PATH/"
+          rm -f "$RES_PATH"/translations/*.ts
+          find "$RES_PATH/translations" -name "*.qm" -size -128c -delete
           cp -R fritzing-parts "$RES_PATH/parts"
 
           # Copy extra dynamic libraries into app bundle

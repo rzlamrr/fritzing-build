@@ -360,6 +360,12 @@ jobs:
           Copy-Item "fritzing-app\help" "release64\" -Recurse -Force
           Copy-Item "fritzing-app\sketches" "release64\" -Recurse -Force
           Copy-Item "fritzing-app\translations" "release64\" -Recurse -Force
+
+          # Like upstream's release scripts: licence texts travel with the binaries (GPL, plus the
+          # LGPL Qt and QuaZip libraries), and only the compiled translations are needed at runtime
+          Copy-Item "fritzing-app\LICENSE*", "fritzing-app\README.md", "fritzing-app\INSTALL.txt" "release64\"
+          Get-ChildItem "release64\translations" -Filter *.ts | Remove-Item
+          Get-ChildItem "release64\translations" -Filter *.qm | Where-Object Length -lt 128 | Remove-Item
         shell: pwsh
 
       # App-local Visual C++ runtime, so users do not need the redistributable installed

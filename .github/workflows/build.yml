@@ -42,7 +42,7 @@ jobs:
       boost_dir: ${{ steps.read.outputs.boost_dir }}
     steps:
       - name: Checkout fritzing-app (version files only)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fritzing/fritzing-app
           ref: develop

@@ -154,10 +154,24 @@ jobs:
       - name: Create or update the draft release
         run: |
           set -euo pipefail
-          tags=$(gh release list --repo "$REPO" --limit 200 --json tagName --jq '.[].tagName')
-          if ! grep -qx "$VER" <<< "$tags"; then
-            gh release create "$VER" --repo "$REPO" --draft --title "Fritzing $VER" \
-              --notes "Unofficial build of Fritzing $VER."
+          # empty = no release yet, true = draft, false = already published
+          is_draft=$(gh release list --repo "$REPO" --limit 200 --json tagName,isDraft \
+            --jq ".[] | select(.tagName == \"$VER\") | .isDraft")
+
+          # never replace the files of a published release
+          if [ "$is_draft" = "false" ]; then
+            echo "Release $VER is already published; not touching it."
+            {
+              echo "### Release $VER is already published"
+              echo
+              echo "Its files were not replaced. Bump the version or delete the release to publish a new build."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -z "$is_draft" ]; then
+            gh release create "$VER" --repo "$REPO" --draft --target "$GITHUB_SHA" \
+              --title "Fritzing $VER" --notes "Unofficial build of Fritzing $VER."
           fi
           gh release upload "$VER" dist/* --repo "$REPO" --clobber
 

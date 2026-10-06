@@ -1,25 +1,47 @@
 name: Build Fritzing on macOS
 
+# Called from build.yml, which reads the dependency versions from fritzing-app and publishes the release.
 on:
-  push:
-    branches: [ master ]
-    paths-ignore:
-      - '.github/workflows/windows.yml'
-      - 'fritzing_setup.iss'
-      - 'README.md'
-  pull_request:
-    branches: [ master ]
-    paths-ignore:
-      - '.github/workflows/windows.yml'
-      - 'fritzing_setup.iss'
-      - 'README.md'
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      fritzing_ver:
+        required: true
+        type: string
+      pri_hash:
+        required: true
+        type: string
+      libgit2_version:
+        required: true
+        type: string
+      quazip_version:
+        required: true
+        type: string
+      clipper_version:
+        required: true
+        type: string
+      svgpp_version:
+        required: true
+        type: string
+      ngspice_version:
+        required: true
+        type: string
+      boost_version:
+        required: true
+        type: string
+      boost_dir:
+        required: true
+        type: string
 
 env:
   QT_VERSION: '6.8.2'
-
-permissions:
-  contents: write
+  FRITZING_VER: ${{ inputs.fritzing_ver }}
+  LIBGIT2_VERSION: ${{ inputs.libgit2_version }}
+  QUAZIP_VERSION: ${{ inputs.quazip_version }}
+  CLIPPER_VERSION: ${{ inputs.clipper_version }}
+  SVGPP_VERSION: ${{ inputs.svgpp_version }}
+  NGSPICE_VERSION: ${{ inputs.ngspice_version }}
+  BOOST_VERSION: ${{ inputs.boost_version }}
+  BOOST_DIR: ${{ inputs.boost_dir }}
 
 jobs:
   build:
@@ -74,26 +96,26 @@ jobs:
           modules: 'qtserialport qt5compat'
           cache: true
 
-      # Cache built dependencies
+      # Cache built dependencies (key changes whenever fritzing-app changes what it expects)
       - name: Cache dependencies
         id: deps-cache
         uses: actions/cache@v4
         with:
           path: |
-            libgit2-1.7.1
-            quazip-${{ env.QT_VERSION }}-1.4intuisphere
-            Clipper1-6.4.2
-            boost_1_85_0
-            svgpp-1.3.1
-            ngspice-42
-          key: macos-deps-v4-${{ env.QT_VERSION }}-${{ matrix.arch }}
+            libgit2-${{ env.LIBGIT2_VERSION }}
+            quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}intuisphere
+            Clipper1-${{ env.CLIPPER_VERSION }}
+            ${{ env.BOOST_DIR }}
+            svgpp-${{ env.SVGPP_VERSION }}
+            ngspice-${{ env.NGSPICE_VERSION }}
+          key: macos-deps-v5-${{ env.QT_VERSION }}-${{ matrix.arch }}-${{ inputs.pri_hash }}
 
-      # Build libgit2 (Static)
+      # Build libgit2 (static)
       - name: Build libgit2
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch v1.7.1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
-          cd libgit2-1.7.1
+          git clone --depth 1 --branch "v$LIBGIT2_VERSION" https://github.com/libgit2/libgit2.git "libgit2-$LIBGIT2_VERSION"
+          cd "libgit2-$LIBGIT2_VERSION"
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
@@ -105,16 +127,14 @@ jobs:
           cmake --build build -j$(sysctl -n hw.ncpu)
           mkdir -p lib
           find build -name "libgit2.a" -exec cp {} lib/libgit2.a \;
-          cd ..
-          ln -sfn libgit2-1.7.1 libgit2 2>/dev/null || true
 
       # Build QuaZip
       - name: Build QuaZip
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
-          curl -L -o quazip.tar.gz https://github.com/stachenov/quazip/archive/refs/tags/v1.4.tar.gz
+          curl -L -f -o quazip.tar.gz "https://github.com/stachenov/quazip/archive/refs/tags/v$QUAZIP_VERSION.tar.gz"
           tar -xzf quazip.tar.gz
-          cd quazip-1.4
+          cd "quazip-$QUAZIP_VERSION"
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=ON \
@@ -123,73 +143,65 @@ jobs:
           cmake --build build -j$(sysctl -n hw.ncpu)
           cd ..
 
-          TARGET_DIR="quazip-${{ env.QT_VERSION }}-1.4intuisphere"
+          TARGET_DIR="quazip-$QT_VERSION-${QUAZIP_VERSION}intuisphere"
           mkdir -p "$TARGET_DIR/lib"
-          mkdir -p "$TARGET_DIR/include/QuaZip-Qt6-1.4/quazip"
+          mkdir -p "$TARGET_DIR/include/QuaZip-Qt6-$QUAZIP_VERSION/quazip"
 
-          find quazip-1.4/build -name "*.dylib" -exec cp {} "$TARGET_DIR/lib/" \;
-          cp quazip-1.4/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-1.4/"
-          cp quazip-1.4/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-1.4/quazip/"
+          find "quazip-$QUAZIP_VERSION/build" -name "*.dylib" -exec cp {} "$TARGET_DIR/lib/" \;
+          cp "quazip-$QUAZIP_VERSION"/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-$QUAZIP_VERSION/"
+          cp "quazip-$QUAZIP_VERSION"/quazip/*.h "$TARGET_DIR/include/QuaZip-Qt6-$QUAZIP_VERSION/quazip/"
 
       # Build Clipper
       - name: Download and build Clipper
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
-          curl -L -o clipper.zip "https://sourceforge.net/projects/polyclipping/files/clipper_ver6.4.2.zip/download"
+          DIR="Clipper1-$CLIPPER_VERSION"
+          curl -L -f -o clipper.zip "https://sourceforge.net/projects/polyclipping/files/clipper_ver$CLIPPER_VERSION.zip/download"
           unzip -q clipper.zip -d clipper-src
-          mkdir -p Clipper1-6.4.2/lib Clipper1-6.4.2/include/polyclipping
+          mkdir -p "$DIR/lib" "$DIR/include/polyclipping"
 
           CPP_FILE=$(find clipper-src -name "clipper.cpp" | head -n 1)
           HPP_FILE=$(find clipper-src -name "clipper.hpp" | head -n 1)
-          cp "$HPP_FILE" Clipper1-6.4.2/include/polyclipping/
-          cp "$HPP_FILE" Clipper1-6.4.2/include/
+          cp "$HPP_FILE" "$DIR/include/polyclipping/"
+          cp "$HPP_FILE" "$DIR/include/"
 
-          clang++ -arch ${{ matrix.arch }} -O3 -fPIC -c "$CPP_FILE" -I Clipper1-6.4.2/include/polyclipping -o clipper.o
-          ar rcs Clipper1-6.4.2/lib/libpolyclipping.a clipper.o
+          clang++ -arch ${{ matrix.arch }} -O3 -fPIC -c "$CPP_FILE" -I "$DIR/include/polyclipping" -o clipper.o
+          ar rcs "$DIR/lib/libpolyclipping.a" clipper.o
           rm -rf clipper.o clipper-src clipper.zip
 
       # Download Boost & SVG++
       - name: Download Boost and SVG++
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
-          curl -L https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.gz | tar -xz
-          curl -L https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz | tar -xz
+          curl -L -f "https://archives.boost.io/release/$BOOST_VERSION/source/$BOOST_DIR.tar.gz" | tar -xz
+          curl -L -f "https://github.com/svgpp/svgpp/archive/refs/tags/v$SVGPP_VERSION.tar.gz" | tar -xz
 
-      # Setup ngspice
+      # Setup ngspice (Homebrew's libngspice, laid out the way fritzing-app expects)
       - name: Setup ngspice headers and library
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           NGSPICE_PREFIX=$(brew --prefix libngspice)
-          mkdir -p ngspice-42/include ngspice-42/lib
-          cp -R "$NGSPICE_PREFIX/include/"* ngspice-42/include/
-          find "$NGSPICE_PREFIX/lib" -name "libngspice*.dylib" -exec cp {} ngspice-42/lib/ \;
+          DIR="ngspice-$NGSPICE_VERSION"
+          mkdir -p "$DIR/include" "$DIR/lib"
+          cp -R "$NGSPICE_PREFIX/include/"* "$DIR/include/"
+          find "$NGSPICE_PREFIX/lib" -name "libngspice*.dylib" -exec cp {} "$DIR/lib/" \;
 
-      # Verify dependency layout
+      # Fail early, with a clear message, if a dependency is not where fritzing-app looks
       - name: Verify dependency layout
         run: |
-          echo "=== Dependency Check ==="
-          ls -la libgit2-1.7.1/include/git2.h
-          ls -la libgit2-1.7.1/lib/libgit2.a
-          ls -la quazip-${{ env.QT_VERSION }}-1.4intuisphere/lib/
-          ls -la Clipper1-6.4.2/lib/libpolyclipping.a
-          ls -la boost_1_85_0/boost/version.hpp
-          ls -la svgpp-1.3.1/include/svgpp/svgpp.hpp
-          ls -la ngspice-42/include/ngspice/sharedspice.h
-
-      # Extract Version
-      - name: Extract Fritzing Version
-        run: |
-          VERSION=$(python3 -c '
-          import re
-          c = open("fritzing-app/src/version/version.cpp").read()
-          major = re.search(r"m_majorVersion\(\"([^\"]*)\"\)", c).group(1)
-          minor = re.search(r"m_minorVersion\(\"([^\"]*)\"\)", c).group(1)
-          patch = re.search(r"m_minorSubVersion\(\"([^\"]*)\"\)", c).group(1)
-          mod = re.search(r"m_modifier\(\"([^\"]*)\"\)", c).group(1)
-          print(f"{major}.{minor}.{patch}{mod}")
-          ')
-          echo "FRITZING_VER=$VERSION" >> $GITHUB_ENV
-          echo "Building Fritzing version: $VERSION"
+          missing=0
+          for f in \
+            "libgit2-$LIBGIT2_VERSION/include/git2.h" \
+            "libgit2-$LIBGIT2_VERSION/lib/libgit2.a" \
+            "quazip-$QT_VERSION-${QUAZIP_VERSION}intuisphere/include/QuaZip-Qt6-$QUAZIP_VERSION/quazip/quazip.h" \
+            "Clipper1-$CLIPPER_VERSION/lib/libpolyclipping.a" \
+            "$BOOST_DIR/boost/version.hpp" \
+            "svgpp-$SVGPP_VERSION/include/svgpp/svgpp.hpp" \
+            "ngspice-$NGSPICE_VERSION/include/ngspice/sharedspice.h"; do
+            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
+          done
+          ls "quazip-$QT_VERSION-${QUAZIP_VERSION}intuisphere/lib/"*.dylib || missing=1
+          exit $missing
 
       # Configure & Build Fritzing
       - name: Configure Fritzing (qmake)
@@ -199,34 +211,6 @@ jobs:
           # Ensure QMAKE_APPLE_DEVICE_ARCHS matches the runner architecture exactly
           sed -i.bak "s/QMAKE_APPLE_DEVICE_ARCHS = .*/QMAKE_APPLE_DEVICE_ARCHS = $ARCH/" phoenix.pro
           qmake phoenix.pro "CONFIG+=release"
-
-      # groundplanegenerator.cpp uses PdmDevicePixelRatioF_EncodedA/B and
-      # QPaintDevice::encodeMetricF() which were added in Qt 6.8. Guard them
-      # so the file still compiles against Qt 6.5.3.
-      - name: Patch source for Qt 6.5 compatibility
-        run: |
-          python3 - <<'PYEOF'
-          import re, pathlib
-          f = pathlib.Path("fritzing-app/src/svg/groundplanegenerator.cpp")
-          src = f.read_text()
-          # Guard the Qt >=6.8 enum cases
-          pattern = (
-              r"([ \t]*case PdmDevicePixelRatioF_EncodedA:\s*\n"
-              r"[ \t]*case PdmDevicePixelRatioF_EncodedB:\s*\n"
-              r"[ \t]*return QPaintDevice::encodeMetricF\(metric, 1\.0\);)"
-          )
-          replacement = (
-              "#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)\n"
-              r"\1"
-              "\n#endif"
-          )
-          patched, n = re.subn(pattern, replacement, src)
-          if n:
-              f.write_text(patched)
-              print(f"Patched {n} occurrence(s) in {f}")
-          else:
-              print("Pattern not found – no patch needed (already guarded or removed upstream)")
-          PYEOF
 
       - name: Build Fritzing (make)
         working-directory: fritzing-app
@@ -250,8 +234,8 @@ jobs:
           cp -R fritzing-parts "$RES_PATH/parts"
 
           # Copy extra dynamic libraries into app bundle
-          cp quazip-${{ env.QT_VERSION }}-1.4intuisphere/lib/*.dylib "$FRAMEWORKS_PATH/" || true
-          cp ngspice-42/lib/*.dylib "$FRAMEWORKS_PATH/" 2>/dev/null || true
+          cp quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}intuisphere/lib/*.dylib "$FRAMEWORKS_PATH/" || true
+          cp ngspice-${{ env.NGSPICE_VERSION }}/lib/*.dylib "$FRAMEWORKS_PATH/" 2>/dev/null || true
 
           # Deploy Qt frameworks
           macdeployqt "$APP_PATH" -always-overwrite
@@ -292,24 +276,12 @@ jobs:
           cd ..
           echo "ZIP_FILE=$ZIP_NAME" >> $GITHUB_ENV
 
-      # Upload Build Artifacts
-      - name: Upload Artifacts
+      # The release job in build.yml publishes these
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Fritzing-macOS-${{ runner.arch }}
+          name: macos-${{ matrix.arch }}
+          if-no-files-found: error
           path: |
             ${{ env.DMG_FILE }}
             ${{ env.ZIP_FILE }}
-
-      # Create / Update GitHub Release (master only)
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/master'
-        with:
-          tag_name: ${{ env.FRITZING_VER }}
-          name: "Fritzing ${{ env.FRITZING_VER }}"
-          files: |
-            ${{ env.DMG_FILE }}
-            ${{ env.ZIP_FILE }}
-          draft: true
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

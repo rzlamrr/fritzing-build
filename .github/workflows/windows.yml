@@ -1,17 +1,49 @@
 name: Build Fritzing on Windows
 
+# Called from build.yml, which reads the dependency versions from fritzing-app and publishes the release.
 on:
-  push:
-    branches: [ master ]
-    paths-ignore:
-      - '.github/workflows/macos.yml'
-      - 'README.md'
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      fritzing_ver:
+        required: true
+        type: string
+      pri_hash:
+        required: true
+        type: string
+      libgit2_version:
+        required: true
+        type: string
+      quazip_version:
+        required: true
+        type: string
+      clipper_version:
+        required: true
+        type: string
+      svgpp_version:
+        required: true
+        type: string
+      ngspice_version:
+        required: true
+        type: string
+      boost_version:
+        required: true
+        type: string
+      boost_dir:
+        required: true
+        type: string
 
 env:
   # fritzing-app develop uses Qt APIs newer than the 6.5.3 its phoenix.pro still allows
   QT_VERSION: '6.8.3'
   QT_ARCH: 'win64_msvc2022_64'
+  FRITZING_VER: ${{ inputs.fritzing_ver }}
+  LIBGIT2_VERSION: ${{ inputs.libgit2_version }}
+  QUAZIP_VERSION: ${{ inputs.quazip_version }}
+  CLIPPER_VERSION: ${{ inputs.clipper_version }}
+  SVGPP_VERSION: ${{ inputs.svgpp_version }}
+  NGSPICE_VERSION: ${{ inputs.ngspice_version }}
+  BOOST_VERSION: ${{ inputs.boost_version }}
+  BOOST_DIR: ${{ inputs.boost_dir }}
 
 jobs:
   build:
@@ -37,31 +69,6 @@ jobs:
           repository: fritzing/fritzing-parts
           ref: develop
           path: fritzing-parts
-
-      # fritzing-app dictates where it looks for each dependency (pri/*detect.pri),
-      # so read the versions from there instead of hard-coding them here.
-      - name: Read dependency versions from fritzing-app
-        run: |
-          function Get-Version($file, $pattern) {
-            $m = [regex]::Match((Get-Content -Raw "fritzing-app\pri\$file"), $pattern)
-            if (-not $m.Success) { throw "Could not read a version from $file (pattern: $pattern)" }
-            $m.Groups[1].Value
-          }
-          $boostMinor = Get-Version "boostdetect.pri" 'BOOSTS\s*=\s*(\d+)'
-          $versions = [ordered]@{
-            LIBGIT2_VERSION = Get-Version "libgit2detect.pri" 'LIBGIT_VERSION\s*=\s*([\d.]+)'
-            QUAZIP_VERSION  = Get-Version "quazipdetect.pri" 'QUAZIP_VERSION\s*=\s*([\d.]+)'
-            CLIPPER_VERSION = Get-Version "clipper1detect.pri" 'Clipper1-([\d.]+)'
-            SVGPP_VERSION   = Get-Version "svgppdetect.pri" 'svgpp-([\d.]+)'
-            NGSPICE_VERSION = Get-Version "spicedetect.pri" 'ngspice-(\d+)'
-            BOOST_VERSION   = "1.$boostMinor.0"
-            BOOST_DIR       = "boost_1_${boostMinor}_0"
-          }
-          foreach ($k in $versions.Keys) {
-            echo "$k=$($versions[$k])"
-            echo "$k=$($versions[$k])" >> $env:GITHUB_ENV
-          }
-        shell: pwsh
 
       # Setup MSVC 2022 environment
       - name: Setup MSVC environment
@@ -94,7 +101,7 @@ jobs:
             ${{ env.BOOST_DIR }}
             svgpp-${{ env.SVGPP_VERSION }}
             ngspice-${{ env.NGSPICE_VERSION }}
-          key: deps-v3-${{ runner.os }}-qt${{ env.QT_VERSION }}-${{ hashFiles('fritzing-app/pri/*detect.pri') }}
+          key: deps-v3-${{ runner.os }}-qt${{ env.QT_VERSION }}-${{ inputs.pri_hash }}
 
       # Build ZLib
       - name: Download ZLib
@@ -332,24 +339,6 @@ jobs:
           Copy-Item "fritzing-app\translations" "release64\" -Recurse -Force
         shell: pwsh
 
-      # Extract Version & Compress
-      - name: Extract Fritzing Version & Zip
-        run: |
-          $verFile = "fritzing-app\src\version\version.cpp"
-          $content = Get-Content -Raw -Path $verFile
-          $major = ([regex]'m_majorVersion\("(.*?)"\)').Match($content).Groups[1].Value
-          $minor = ([regex]'m_minorVersion\("(.*?)"\)').Match($content).Groups[1].Value
-          $patch = ([regex]'m_minorSubVersion\("(.*?)"\)').Match($content).Groups[1].Value
-          $mod = ([regex]'m_modifier\("(.*?)"\)').Match($content).Groups[1].Value
-          
-          $versionStr = "$major.$minor.$patch$mod"
-          echo "FRITZING_VER=$versionStr" >> $env:GITHUB_ENV
-          
-          $zipName = "Fritzing-$versionStr-Windows-x64.zip"
-          Compress-Archive -Path "release64\*" -DestinationPath $zipName
-          echo "ZIP_FILE=$zipName" >> $env:GITHUB_ENV
-        shell: pwsh
-
       # Prepare fritzing-parts (clone + pre-built parts.db)
       - name: Clone fritzing-parts
         run: |
@@ -418,17 +407,14 @@ jobs:
           echo "OFFLINE_SETUP_FILE=Fritzing-$env:FRITZING_VER-OfflineSetup-Windows-x64.exe" >> $env:GITHUB_ENV
         shell: pwsh
 
-      # Create GitHub Release
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/master'
+      # The release job in build.yml publishes these
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.FRITZING_VER }}
-          name: "Fritzing ${{ env.FRITZING_VER }}"
-          files: |
+          name: windows
+          if-no-files-found: error
+          path: |
             ${{ env.ZIP_FILE }}
             ${{ env.ONLINE_SETUP_FILE }}
             ${{ env.OFFLINE_SETUP_FILE }}
             fritzing-parts.zip
-          draft: true
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}

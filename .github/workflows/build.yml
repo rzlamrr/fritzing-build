@@ -1,0 +1,171 @@
+name: Build Fritzing
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - 'README.md'
+  pull_request:
+    branches: [ master ]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build
+        type: choice
+        options: [ all, windows, macos ]
+        default: all
+
+permissions:
+  contents: read
+
+# A new push to a pull request replaces its still-running build
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # fritzing-app dictates where it looks for each dependency (pri/*detect.pri), so read the
+  # versions from there once and hand them to both platform builds.
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      fritzing_ver: ${{ steps.read.outputs.fritzing_ver }}
+      pri_hash: ${{ steps.read.outputs.pri_hash }}
+      libgit2_version: ${{ steps.read.outputs.libgit2_version }}
+      quazip_version: ${{ steps.read.outputs.quazip_version }}
+      clipper_version: ${{ steps.read.outputs.clipper_version }}
+      svgpp_version: ${{ steps.read.outputs.svgpp_version }}
+      ngspice_version: ${{ steps.read.outputs.ngspice_version }}
+      boost_version: ${{ steps.read.outputs.boost_version }}
+      boost_dir: ${{ steps.read.outputs.boost_dir }}
+    steps:
+      - name: Checkout fritzing-app (version files only)
+        uses: actions/checkout@v4
+        with:
+          repository: fritzing/fritzing-app
+          ref: develop
+          sparse-checkout: |
+            pri
+            src/version
+
+      - name: Read versions
+        id: read
+        run: |
+          python3 - <<'PYEOF'
+          import glob, hashlib, os, re, sys
+
+          def read(path, pattern):
+              m = re.search(pattern, open(path, encoding="utf-8").read())
+              if not m:
+                  sys.exit(f"::error::Could not read a version from {path} (pattern: {pattern})")
+              return m.group(1)
+
+          boost_minor = read("pri/boostdetect.pri", r"BOOSTS\s*=\s*(\d+)")
+          out = {
+              "libgit2_version": read("pri/libgit2detect.pri", r"LIBGIT_VERSION\s*=\s*([\d.]+)"),
+              "quazip_version": read("pri/quazipdetect.pri", r"QUAZIP_VERSION\s*=\s*([\d.]+)"),
+              "clipper_version": read("pri/clipper1detect.pri", r"Clipper1-([\d.]+)"),
+              "svgpp_version": read("pri/svgppdetect.pri", r"svgpp-([\d.]+)"),
+              "ngspice_version": read("pri/spicedetect.pri", r"ngspice-(\d+)"),
+              "boost_version": f"1.{boost_minor}.0",
+              "boost_dir": f"boost_1_{boost_minor}_0",
+          }
+
+          # app version, e.g. 1.0.6 or 1.0.7-rc1
+          cpp = open("src/version/version.cpp", encoding="utf-8").read()
+          parts = [re.search(rf'{name}\("([^"]*)"\)', cpp) for name in
+                   ("m_majorVersion", "m_minorVersion", "m_minorSubVersion", "m_modifier")]
+          if not all(parts):
+              sys.exit("::error::Could not read the Fritzing version from src/version/version.cpp")
+          major, minor, patch, modifier = (m.group(1) for m in parts)
+          out["fritzing_ver"] = f"{major}.{minor}.{patch}{modifier}"
+
+          # changes whenever fritzing-app changes what it expects, so dependency caches get rebuilt
+          digest = hashlib.sha256()
+          for path in sorted(glob.glob("pri/*detect.pri")):
+              digest.update(open(path, "rb").read())
+          out["pri_hash"] = digest.hexdigest()[:16]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              for key, value in out.items():
+                  print(f"{key}={value}")
+                  fh.write(f"{key}={value}\n")
+          PYEOF
+
+  windows:
+    needs: versions
+    if: inputs.platforms != 'macos'
+    uses: ./.github/workflows/windows.yml
+    with:
+      fritzing_ver: ${{ needs.versions.outputs.fritzing_ver }}
+      pri_hash: ${{ needs.versions.outputs.pri_hash }}
+      libgit2_version: ${{ needs.versions.outputs.libgit2_version }}
+      quazip_version: ${{ needs.versions.outputs.quazip_version }}
+      clipper_version: ${{ needs.versions.outputs.clipper_version }}
+      svgpp_version: ${{ needs.versions.outputs.svgpp_version }}
+      ngspice_version: ${{ needs.versions.outputs.ngspice_version }}
+      boost_version: ${{ needs.versions.outputs.boost_version }}
+      boost_dir: ${{ needs.versions.outputs.boost_dir }}
+
+  macos:
+    needs: versions
+    if: inputs.platforms != 'windows'
+    uses: ./.github/workflows/macos.yml
+    with:
+      fritzing_ver: ${{ needs.versions.outputs.fritzing_ver }}
+      pri_hash: ${{ needs.versions.outputs.pri_hash }}
+      libgit2_version: ${{ needs.versions.outputs.libgit2_version }}
+      quazip_version: ${{ needs.versions.outputs.quazip_version }}
+      clipper_version: ${{ needs.versions.outputs.clipper_version }}
+      svgpp_version: ${{ needs.versions.outputs.svgpp_version }}
+      ngspice_version: ${{ needs.versions.outputs.ngspice_version }}
+      boost_version: ${{ needs.versions.outputs.boost_version }}
+      boost_dir: ${{ needs.versions.outputs.boost_dir }}
+
+  # One draft release for the whole version. A platform that failed or was not selected is
+  # simply left out (re-running the failed jobs adds its files to the same draft).
+  release:
+    needs: [ versions, windows, macos ]
+    if: >-
+      ${{ !cancelled() && github.ref == 'refs/heads/master' &&
+          (needs.windows.result == 'success' || needs.macos.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      VER: ${{ needs.versions.outputs.fritzing_ver }}
+      WINDOWS_RESULT: ${{ needs.windows.result }}
+      MACOS_RESULT: ${{ needs.macos.result }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the draft release
+        run: |
+          set -euo pipefail
+          tags=$(gh release list --repo "$REPO" --limit 200 --json tagName --jq '.[].tagName')
+          if ! grep -qx "$VER" <<< "$tags"; then
+            gh release create "$VER" --repo "$REPO" --draft --title "Fritzing $VER" \
+              --notes "Unofficial build of Fritzing $VER."
+          fi
+          gh release upload "$VER" dist/* --repo "$REPO" --clobber
+
+          {
+            echo "### Draft release $VER"
+            echo
+            ls -1 dist | sed 's/^/- /'
+            for platform in WINDOWS MACOS; do
+              result="${platform}_RESULT"
+              if [ "${!result}" != "success" ]; then
+                echo
+                echo "No $platform files: build result was ${!result}."
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

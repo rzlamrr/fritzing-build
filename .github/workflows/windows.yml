@@ -321,7 +321,7 @@ jobs:
       # Deploy Qt runtime DLLs
       - name: Deploy Qt (windeployqt)
         working-directory: release64
-        run: windeployqt Fritzing.exe
+        run: windeployqt --no-compiler-runtime Fritzing.exe
         shell: cmd
 
       # qmake builds into release64, so the compiler output ends up next to Fritzing.exe and
@@ -332,22 +332,50 @@ jobs:
           $mb = [math]::Round(($leftovers | Measure-Object Length -Sum).Sum / 1MB, 1)
           echo "Removing $($leftovers.Count) files ($mb MB)"
           $leftovers | Remove-Item -Force
+
+          # Fritzing only uses SQLite; the PostgreSQL/Mimer drivers need DLLs that are not shipped
+          Get-ChildItem "release64\sqldrivers\*" -File -Exclude qsqlite.dll | Remove-Item -Force
+
           if (-not (Test-Path "release64\Fritzing.exe")) { throw "Fritzing.exe is missing from release64" }
         shell: pwsh
 
       # Copy Third-Party DLLs & Runtime Data
       - name: Copy third-party DLLs and data folders
         run: |
+          $ErrorActionPreference = "Stop"
+
           # Copy extra DLLs
-          Copy-Item "quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}intuisphere\lib\*.dll" "release64\" -ErrorAction SilentlyContinue
-          Copy-Item "ngspice-${{ env.NGSPICE_VERSION }}\*.dll" "release64\" -ErrorAction SilentlyContinue
+          Copy-Item "quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}intuisphere\lib\*.dll" "release64\"
           Copy-Item "$env:QT_ROOT_DIR\bin\Qt6Core5Compat.dll" "release64\" -ErrorAction SilentlyContinue
+
+          # The circuit simulator loads ngspice.dll from the app folder, plus the code models from
+          # an ngspice\ folder next to it (ngspice_simulator.cpp). libomp140 is ngspice's OpenMP runtime.
+          $ngspice = "ngspice-${{ env.NGSPICE_VERSION }}"
+          Copy-Item "$ngspice\dll-vs\*.dll" "release64\"
+          New-Item -ItemType Directory -Force -Path "release64\ngspice" | Out-Null
+          Copy-Item "$ngspice\lib\ngspice\*" "release64\ngspice\"
 
           # Fritzing needs these folders alongside the .exe to run
           # (Note: fritzing-parts is purposefully omitted to shave 300MB; it will be downloaded by the setup)
           Copy-Item "fritzing-app\help" "release64\" -Recurse -Force
           Copy-Item "fritzing-app\sketches" "release64\" -Recurse -Force
           Copy-Item "fritzing-app\translations" "release64\" -Recurse -Force
+        shell: pwsh
+
+      # App-local Visual C++ runtime, so users do not need the redistributable installed
+      - name: Bundle the Visual C++ runtime
+        run: |
+          $crt = Get-ChildItem "$env:VCToolsRedistDir\x64\Microsoft.VC*.CRT" -Directory | Select-Object -First 1
+          if (-not $crt) { throw "Visual C++ runtime folder not found under $env:VCToolsRedistDir" }
+          echo "Copying the runtime from $($crt.FullName)"
+          Copy-Item "$($crt.FullName)\*.dll" "release64\"
+        shell: pwsh
+
+      # Fails the build if anything in release64 imports a DLL that is neither bundled nor part of Windows
+      - name: Check the build is self-contained
+        run: |
+          python -m pip install --quiet pefile
+          python fritzing-build\scripts\check_runtime_deps.py release64
         shell: pwsh
 
       # Prepare fritzing-parts (clone + pre-built parts.db)

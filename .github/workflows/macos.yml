@@ -62,19 +62,19 @@ jobs:
     steps:
       # Checkout repositories
       - name: Checkout fritzing-build
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: fritzing-build
 
       - name: Checkout fritzing-app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fritzing/fritzing-app
           ref: develop
           path: fritzing-app
 
       - name: Checkout fritzing-parts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fritzing/fritzing-parts
           ref: develop

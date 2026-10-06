@@ -324,6 +324,17 @@ jobs:
         run: windeployqt Fritzing.exe
         shell: cmd
 
+      # qmake builds into release64, so the compiler output ends up next to Fritzing.exe and
+      # would be shipped in every installer and the zip (obj, generated moc/qrc/ui sources, import lib)
+      - name: Remove build leftovers from release64
+        run: |
+          $leftovers = Get-ChildItem "release64\*" -File -Include *.obj, *.cpp, *.h, *.lib, *.exp, *.res
+          $mb = [math]::Round(($leftovers | Measure-Object Length -Sum).Sum / 1MB, 1)
+          echo "Removing $($leftovers.Count) files ($mb MB)"
+          $leftovers | Remove-Item -Force
+          if (-not (Test-Path "release64\Fritzing.exe")) { throw "Fritzing.exe is missing from release64" }
+        shell: pwsh
+
       # Copy Third-Party DLLs & Runtime Data
       - name: Copy third-party DLLs and data folders
         run: |
